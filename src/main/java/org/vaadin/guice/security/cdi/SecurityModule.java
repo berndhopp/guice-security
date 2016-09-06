@@ -6,10 +6,12 @@ import com.google.inject.AbstractModule;
 import com.google.inject.multibindings.Multibinder;
 
 import com.vaadin.guice.annotation.GuiceView;
+import com.vaadin.guice.server.UsesReflections;
 import com.vaadin.navigator.View;
 
 import org.reflections.Reflections;
 import org.vaadin.guice.security.annotations.PermissionDeniedView;
+import org.vaadin.guice.security.api.ComponentVisibilityEvaluator;
 import org.vaadin.guice.security.api.Guard;
 import org.vaadin.guice.security.api.PermissionEvaluator;
 
@@ -19,17 +21,21 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.inject.name.Names.named;
 
-public abstract class SecurityModule extends AbstractModule {
+public class SecurityModule extends AbstractModule implements UsesReflections {
 
-    private final Reflections reflections;
+    private Reflections reflections;
 
-    protected SecurityModule(Reflections reflections) {
-        this.reflections = reflections;
+    protected Class<? extends PermissionEvaluator> getPermissionEvaluatorClass(){
+        return new PermissionEvaluator(){
+
+            public boolean hasPermission(String permission) {
+                throw new UnsupportedOperationException("in order to use @NeedsPermission, SecurityModule.getPermissionEvaluatorClass() needs to be overwritten");
+            }
+        }.getClass();
     }
 
-    protected abstract Class<? extends PermissionEvaluator> getPermissionEvaluatorClass();
-
     protected void configure() {
+
         bind(PermissionEvaluator.class).to(checkNotNull(getPermissionEvaluatorClass()));
         bindPermissionDeniedView();
 
@@ -38,6 +44,8 @@ public abstract class SecurityModule extends AbstractModule {
         for (Class<? extends Guard> guardClass : reflections.getSubTypesOf(Guard.class)) {
             guardMultibinder.addBinding().to(guardClass);
         }
+
+        bind(ComponentVisibilityEvaluator.class).to(NavigationAccessChecker.class);
     }
 
     private void bindPermissionDeniedView() {
@@ -45,7 +53,7 @@ public abstract class SecurityModule extends AbstractModule {
 
         switch (permissionDeniedViews.size()){
             case 0:
-                bind(String.class).annotatedWith(named("guice_security_permission_denied_view")).toInstance(null);
+                bind(String.class).annotatedWith(named("guice_security_permission_denied_view")).toInstance("permissionDeniedGuiceDefault");
                 break;
             case 1:
                 final Class<?> permissionDeniedView = Iterables.getOnlyElement(permissionDeniedViews);
@@ -71,8 +79,12 @@ public abstract class SecurityModule extends AbstractModule {
                 break;
             default:
                 final String names = Joiner.on(",").join(permissionDeniedViews);
-
                 throw new IllegalStateException("multiple classes have PermissionDeniedView annotation: " + names);
         }
+    }
+
+    public void setReflections(Reflections reflections) {
+        this.reflections = reflections;
+        reflections.merge(new Reflections("org.vaadin.guice.security"));
     }
 }

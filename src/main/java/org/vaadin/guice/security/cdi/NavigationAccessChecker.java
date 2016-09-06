@@ -1,7 +1,6 @@
 package org.vaadin.guice.security.cdi;
 
 import com.google.inject.Inject;
-import com.google.inject.Singleton;
 import com.google.inject.name.Named;
 
 import com.vaadin.guice.annotation.GuiceViewChangeListener;
@@ -12,10 +11,10 @@ import com.vaadin.navigator.ViewChangeListener;
 import com.vaadin.ui.Component;
 
 import org.vaadin.guice.security.annotations.GuardedBy;
+import org.vaadin.guice.security.annotations.NeedsPermission;
 import org.vaadin.guice.security.api.ComponentVisibilityEvaluator;
 import org.vaadin.guice.security.api.Guard;
 import org.vaadin.guice.security.api.PermissionEvaluator;
-import org.vaadin.guice.security.annotations.NeedsPermission;
 
 import java.util.Set;
 
@@ -45,29 +44,28 @@ class NavigationAccessChecker implements ViewChangeListener, ComponentVisibility
 
         final Class<? extends View> newViewClass = viewChangeEvent.getNewView().getClass();
 
-        final NeedsPermission needsPermission = newViewClass.getAnnotation(NeedsPermission.class);
-
-        final GuardedBy guardedBy = newViewClass.getAnnotation(GuardedBy.class);
-
-        boolean isPermitted = isPermitted(needsPermission, guardedBy);
+        boolean isPermitted = isPermitted(newViewClass);
 
         if(!isPermitted){
-            navigateToPermissionDeniedViewIfPresent();
+            navigateToPermissionDeniedView();
         }
 
         return isPermitted;
     }
 
-    private boolean isPermitted(NeedsPermission needsPermission, GuardedBy guardedBy) {
+    private boolean isPermitted(Class<?> clazz) {
+        NeedsPermission needsPermission = clazz.getAnnotation(NeedsPermission.class);
 
         if(needsPermission != null){
-            if(!permissionEvaluator.hasPermission(needsPermission.permission())){
+            if(!permissionEvaluator.hasPermission(needsPermission.value())){
                 return false;
             }
         }
 
+        GuardedBy guardedBy = clazz.getAnnotation(GuardedBy.class);
+
         if(guardedBy != null){
-            for (Class<? extends Guard> guardClass : guardedBy.guards()) {
+            for (Class<? extends Guard> guardClass : guardedBy.value()) {
                 for (Guard guard : allGuards) {
                     if(guard.getClass().equals(guardClass)){
                         if(!guard.hasAccess()){
@@ -81,24 +79,28 @@ class NavigationAccessChecker implements ViewChangeListener, ComponentVisibility
         return true;
     }
 
-    private void navigateToPermissionDeniedViewIfPresent(){
-        if(permissionDeniedView != null){
-            navigatorProvider.get().navigateTo(permissionDeniedView);
-        }
+    private void navigateToPermissionDeniedView(){
+        navigatorProvider.get().navigateTo(permissionDeniedView);
     }
 
     public void afterViewChange(ViewChangeEvent viewChangeEvent) {
     }
 
     public void evaluate() {
+        final View currentView = navigatorProvider.get().getCurrentView();
+
+        if(currentView != null){
+            final Class<? extends View> viewClass = currentView.getClass();
+
+            if(!isPermitted(viewClass)){
+                navigateToPermissionDeniedView();
+            }
+        }
+
         for (Component restrictedComponent : restrictedComponents) {
             Class<? extends Component> restrictedComponentClass = restrictedComponent.getClass();
 
-            final NeedsPermission needsPermission = restrictedComponentClass.getAnnotation(NeedsPermission.class);
-
-            final GuardedBy guardedBy = restrictedComponentClass.getAnnotation(GuardedBy.class);
-
-            restrictedComponent.setVisible(isPermitted(needsPermission, guardedBy));
+            restrictedComponent.setVisible(isPermitted(restrictedComponentClass));
         }
     }
 }
